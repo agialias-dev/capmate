@@ -4,37 +4,37 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/agialias-dev/capmate/internal/auth"
+	objects "github.com/agialias-dev/capmate/internal/json"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	auth "github.com/microsoft/kiota-authentication-azure-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 )
 
-type GraphHelper struct {
-	deviceCodeCredential *azidentity.DeviceCodeCredential
-	userClient           *msgraphsdk.GraphServiceClient
-	graphUserScopes      []string
+type UserSession struct {
+	InteractiveBrowserCredential *azidentity.InteractiveBrowserCredential
+	userClient                   *msgraphsdk.GraphServiceClient
 }
 
-func NewGraphHelper() *GraphHelper {
-	g := &GraphHelper{}
-	return g
+func NewUserSession() *UserSession {
+	us := &UserSession{}
+	return us
 }
 
-func InitializeGraph(graphHelper *GraphHelper) {
-	err := graphHelper.InitializeGraphForUserAuth()
+func InitializeGraph(UserSession *UserSession) {
+	credential, client, err := auth.InitializeUserSession()
+	UserSession.InteractiveBrowserCredential = credential
+	UserSession.userClient = client
 	if err != nil {
 		log.Panicf("Error initializing Graph for user auth: %v\n", err)
 	}
 }
 
-func GreetUser(graphHelper *GraphHelper) {
-	user, err := graphHelper.GetUser()
+func GreetUser(UserSession *UserSession) {
+	user, err := UserSession.GetUser()
 	if err != nil {
 		log.Panicf("Error getting user: %v\n", err)
 	}
@@ -52,96 +52,42 @@ func GreetUser(graphHelper *GraphHelper) {
 	fmt.Println()
 }
 
-func DisplayAccessToken(graphHelper *GraphHelper) {
-	token, err := graphHelper.GetUserToken()
-	if err != nil {
-		log.Panicf("Error getting user token: %v\n", err)
-	}
-
-	fmt.Printf("User token: %s", *token)
-	fmt.Println()
-}
-
-func MakeGraphCall(graphHelper *GraphHelper) {
-	err := graphHelper.GraphCall()
+func GetAllCAPs(UserSession *UserSession) {
+	err := UserSession.GetConditionalAccessPolicies()
 	if err != nil {
 		log.Panicf("Error making Graph call: %v", err)
 	}
 }
 
-func (g *GraphHelper) InitializeGraphForUserAuth() error {
-	clientId := os.Getenv("CLIENT_ID")
-	tenantId := os.Getenv("TENANT_ID")
-	scopes := os.Getenv("GRAPH_USER_SCOPES")
-	g.graphUserScopes = strings.Split(scopes, ",")
-
-	// Create the device code credential
-	credential, err := azidentity.NewDeviceCodeCredential(&azidentity.DeviceCodeCredentialOptions{
-		ClientID: clientId,
-		TenantID: tenantId,
-		UserPrompt: func(ctx context.Context, message azidentity.DeviceCodeMessage) error {
-			fmt.Println(message.Message)
-			return nil
-		},
-	})
-	if err != nil {
-		return err
-	}
-
-	g.deviceCodeCredential = credential
-
-	// Create an auth provider using the credential
-	authProvider, err := auth.NewAzureIdentityAuthenticationProviderWithScopes(credential, g.graphUserScopes)
-	if err != nil {
-		return err
-	}
-
-	// Create a request adapter using the auth provider
-	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
-	if err != nil {
-		return err
-	}
-
-	// Create a Graph client using request adapter
-	client := msgraphsdk.NewGraphServiceClient(adapter)
-	g.userClient = client
-
-	return nil
-}
-
-func (g *GraphHelper) GetUserToken() (*string, error) {
-	token, err := g.deviceCodeCredential.GetToken(context.Background(), policy.TokenRequestOptions{
-		Scopes: g.graphUserScopes,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &token.Token, nil
-}
-
-func (g *GraphHelper) GetUser() (models.Userable, error) {
+func (us *UserSession) GetUser() (models.Userable, error) {
 	query := users.UserItemRequestBuilderGetQueryParameters{
 		// Only request specific properties
 		Select: []string{"displayName", "mail", "userPrincipalName"},
 	}
 
-	return g.userClient.Me().Get(context.Background(),
+	return us.userClient.Me().Get(context.Background(),
 		&users.UserItemRequestBuilderGetRequestConfiguration{
 			QueryParameters: &query,
 		})
 }
 
-func (g *GraphHelper) GraphCall() error {
+func (us *UserSession) GetConditionalAccessPolicies() error {
 
-	result, err := g.userClient.Identity().ConditionalAccess().Policies().Get(context.Background(), nil)
+	result, err := us.userClient.Identity().ConditionalAccess().Policies().Get(context.Background(), nil)
 	if err != nil {
 		return err
 	}
 	fmt.Println("Conditional Access Policies:")
 	policies := result.GetValue()
 	for _, policy := range policies {
-		fmt.Printf("- %s\n", *policy.GetDisplayName())
+		CAPolicy := objects.ConditionalAccessPolicy{
+			ID:          *policy.GetId(),
+			DisplayName: *policy.GetDisplayName(),
+			State:       policy.GetState().String(),
+		}
+		fmt.Println("-----")
+		fmt.Printf("- ID: %s\n- Name: %s\n- State: %s\n", CAPolicy.ID, CAPolicy.DisplayName, CAPolicy.State)
+		fmt.Println("-----")
 	}
 	return nil
 }
