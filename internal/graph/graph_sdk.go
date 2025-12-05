@@ -6,7 +6,6 @@ import (
 	"log"
 
 	"github.com/agialias-dev/capmate/internal/auth"
-	objects "github.com/agialias-dev/capmate/internal/json"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
@@ -17,6 +16,7 @@ import (
 type UserSession struct {
 	InteractiveBrowserCredential *azidentity.InteractiveBrowserCredential
 	userClient                   *msgraphsdk.GraphServiceClient
+	Token                        azidentity.Cache
 }
 
 func NewUserSession() *UserSession {
@@ -25,12 +25,13 @@ func NewUserSession() *UserSession {
 }
 
 func InitializeGraph(UserSession *UserSession) {
-	credential, client, err := auth.InitializeUserSession()
-	UserSession.InteractiveBrowserCredential = credential
-	UserSession.userClient = client
+	credential, client, cache, err := auth.InitializeUserSession()
 	if err != nil {
 		log.Panicf("Error initializing Graph for user auth: %v\n", err)
 	}
+	UserSession.InteractiveBrowserCredential = credential
+	UserSession.userClient = client
+	UserSession.Token = cache
 }
 
 func GreetUser(UserSession *UserSession) {
@@ -72,7 +73,6 @@ func (us *UserSession) GetUser() (models.Userable, error) {
 }
 
 func (us *UserSession) GetConditionalAccessPolicies() error {
-
 	result, err := us.userClient.Identity().ConditionalAccess().Policies().Get(context.Background(), nil)
 	if err != nil {
 		return err
@@ -80,14 +80,15 @@ func (us *UserSession) GetConditionalAccessPolicies() error {
 	fmt.Println("Conditional Access Policies:")
 	policies := result.GetValue()
 	for _, policy := range policies {
-		CAPolicy := objects.ConditionalAccessPolicy{
-			ID:          *policy.GetId(),
-			DisplayName: *policy.GetDisplayName(),
-			State:       policy.GetState().String(),
-		}
-		fmt.Println("-----")
-		fmt.Printf("- ID: %s\n- Name: %s\n- State: %s\n", CAPolicy.ID, CAPolicy.DisplayName, CAPolicy.State)
-		fmt.Println("-----")
+		conditions := policy.GetConditions()
+		grantControls := policy.GetGrantControls()
+		sessionControls := policy.GetSessionControls()
+		fmt.Printf("- Name:\t%s\n", *policy.GetDisplayName())
+		fmt.Printf("- State:\t%s\n", *policy.GetState())
+		fmt.Printf("- Conditions:\t%+v\n", conditions.GetApplications().GetIncludeApplications())
+		fmt.Printf("- Grant Controls:\t%+v\n", grantControls)
+		fmt.Printf("- Session Controls:\t%+v\n", sessionControls)
+		fmt.Println()
 	}
 	return nil
 }

@@ -29,6 +29,7 @@ func main() {
 		fmt.Println("Please choose one of the following options:")
 		fmt.Println("0. Exit")
 		fmt.Println("1. Get Conditional Access Policies")
+		fmt.Println("2. Get HTTP Conditional Access Policies")
 
 		_, err = fmt.Scanf("%d", &choice)
 		if err != nil {
@@ -39,6 +40,11 @@ func main() {
 			fmt.Println("Goodbye...")
 		case 1:
 			graph.GetAllCAPs(userSession)
+		case 2:
+			err = graph.GetHTTPCAPs(userSession)
+			if err != nil {
+				log.Println(err.Error())
+			}
 		default:
 			fmt.Println("Invalid choice! Please try again.")
 		}
